@@ -1,0 +1,16 @@
+{
+  "attributes": {
+    "OBJECTID": 303,
+    "ZonePetition": "2024-001",
+    "ZoneDes": "N1-B",
+    "SPA": "NO",
+    "Overlay": "TOD",
+    "RezoneDate": 1711929600000,
+    "ZoneClass": "Single Family",
+    "Hyperlink": "https://example.test/zoning/2024-001"
+  },
+  "geometry": {
+    "rings": [[[-80.85, 35.23], [-80.84, 35.23], [-80.84, 35.22], [-80.85, 35.23]]],
+    "spatialReference": {"wkid": 4326}
+  }
+}

@@ -14,7 +14,8 @@ flowchart LR
     Browser[Browser] -->|GET /| Next[Next.js]
     Browser -->|GET /api/*| API[FastAPI on Vercel]
     API -->|pooled DATABASE_URL| Neon[(Neon Postgres)]
-    PC[Pipeline workstation] -->|direct DATABASE_URL_DIRECT| Neon
+    Sources[Public and licensed sources] --> Prefect[Prefect pipeline]
+    Prefect -->|direct DATABASE_URL_DIRECT| Neon
     Alembic[Alembic migrations] -->|direct DATABASE_URL_DIRECT| Neon
 ```
 
@@ -52,10 +53,12 @@ parcel-panda/
 │   └── routes/                # FastAPI route modules
 ├── alembic/                   # Database migrations
 ├── pipelines/
-│   ├── ingest_properties.py   # Direct-to-Neon ingestion job
+│   ├── __main__.py            # Dry-run-first command-line interface
+│   ├── flow.py                # Prefect orchestration flow
+│   ├── catalog.py             # Dataset and source registry
+│   ├── contracts.py           # Normalized ingestion records
 │   ├── requirements.txt       # Heavy data/geospatial dependencies
-│   ├── sources/               # Source-specific ingestion code
-│   └── transforms/            # Data normalization and transforms
+│   └── sources/               # Source adapters and pure normalization helpers
 ├── neon.ts                    # Neon branch and service policy
 ├── requirements.txt           # Lightweight Vercel Python dependencies
 └── vercel.json                # Same-domain API routing
@@ -64,6 +67,61 @@ parcel-panda/
 The root Python environment stays intentionally small. Packages such as Pandas,
 GeoPandas, PyArrow, NumPy, and Shapely live only in `pipelines/.venv` and are not
 installed in the Vercel runtime.
+
+## Data pipelines
+
+The catalog pipelines run outside Vercel and use Prefect for orchestration,
+retries, and observable task/flow runs. They normalize source-specific records,
+retain source provenance when requested, and use content hashes plus database
+constraints to make repeated ingestion idempotent.
+
+Install the pipeline environment, copy `.env.example` to the ignored
+`.env.local`, and load its values:
+
+```bash
+python3 -m venv pipelines/.venv
+source pipelines/.venv/bin/activate
+python -m pip install -r pipelines/requirements-dev.txt
+set -a
+source .env.local
+set +a
+```
+
+Every command is a dry run unless `--write` is present:
+
+```bash
+# Preview the default public starter set without changing Postgres.
+python -m pipelines
+
+# Preview selected Wake County datasets with a small source limit.
+python -m pipelines \
+  --dataset parcel-records \
+  --dataset housing-demographics \
+  --county-fips 37183 \
+  --limit 100
+
+# Persist the same normalized records after reviewing the dry-run summary.
+python -m pipelines \
+  --dataset parcel-records \
+  --county-fips 37183 \
+  --limit 100 \
+  --write
+```
+
+Dry-run mode prevents database mutation; it still calls selected upstream APIs
+and can consume provider quota. Keep `--limit` small while iterating.
+
+Use `--no-raw-payloads` when source payload retention is unnecessary. Run
+`python -m pipelines --help` for every dataset slug and option. Write runs need
+`DATABASE_URL_DIRECT`; Census and RentCast adapters read `CENSUS_API_KEY` and
+`RENTCAST_API_KEY`, respectively. Never expose those values to the Next.js
+client or commit them.
+
+The catalog is transparent about source boundaries: county parcel schemas and
+update schedules vary, municipal zoning is not statewide, flood layers describe
+mapped hazards rather than property-specific risk, mortgage data is aggregated
+rather than loan-level, and licensed listing coverage depends on the provider.
+Absence from a source is not proof that a property or condition does not exist.
 
 ## Deployment and operations
 
