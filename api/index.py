@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from backend.routes import properties_router
 
 app = FastAPI(
-    title="Plot Twist API",
+    title="Parcel Panda API",
     version="0.1.0",
 )
 
@@ -14,5 +14,5 @@ app.include_router(properties_router)
 def health():
     return {
         "status": "ok",
-        "service": "plot-twist-api",
+        "service": "parcel-panda-api",
     }

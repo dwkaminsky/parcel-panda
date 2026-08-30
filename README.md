@@ -1,36 +1,180 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Parcel Panda
 
-## Getting Started
+Parcel Panda is a real-estate data application that combines a Next.js frontend,
+a FastAPI backend, and Neon Postgres in one Vercel deployment. A separate Python
+pipeline environment handles heavyweight geospatial and data-processing work
+without adding those dependencies to the deployed application.
 
-First, run the development server:
+Live application: [parcel-panda.vercel.app](https://parcel-panda.vercel.app/)
+
+## Architecture
+
+```mermaid
+flowchart LR
+    Browser[Browser] -->|GET /| Next[Next.js]
+    Browser -->|GET /api/*| API[FastAPI on Vercel]
+    API -->|pooled DATABASE_URL| Neon[(Neon Postgres)]
+    PC[Pipeline workstation] -->|direct DATABASE_URL_DIRECT| Neon
+    Alembic[Alembic migrations] -->|direct DATABASE_URL_DIRECT| Neon
+```
+
+Vercel serves both runtimes from one domain:
+
+- `/` is rendered by Next.js.
+- `/api/health` and `/api/properties` are handled by FastAPI.
+- `vercel.json` rewrites `/api/*` requests to the Python entrypoint.
+- FastAPI reads application data from Neon through its pooled endpoint.
+- Alembic and offline pipelines connect directly to Neon for session-level and
+  high-volume operations.
+
+### Database connections
+
+| Variable | Connection | Used by |
+| --- | --- | --- |
+| `DATABASE_URL` | Neon pooled endpoint (`-pooler`) | FastAPI and Vercel request traffic |
+| `DATABASE_URL_DIRECT` | Neon direct endpoint | Alembic migrations and pipeline jobs |
+
+SQLAlchemy uses Psycopg 3 and `NullPool` in the web application. Neon/PgBouncer
+provides the shared connection pool, so ephemeral Vercel processes do not retain
+their own persistent SQLAlchemy pools.
+
+## Repository layout
+
+```text
+parcel-panda/
+├── app/                       # Next.js App Router frontend
+├── api/
+│   └── index.py               # FastAPI/Vercel entrypoint
+├── backend/
+│   ├── database.py            # SQLAlchemy engine and sessions
+│   ├── models.py              # Property model
+│   ├── schemas.py             # API response schemas
+│   └── routes/                # FastAPI route modules
+├── alembic/                   # Database migrations
+├── pipelines/
+│   ├── ingest_properties.py   # Direct-to-Neon ingestion job
+│   ├── requirements.txt       # Heavy data/geospatial dependencies
+│   ├── sources/               # Source-specific ingestion code
+│   └── transforms/            # Data normalization and transforms
+├── neon.ts                    # Neon branch and service policy
+├── requirements.txt           # Lightweight Vercel Python dependencies
+└── vercel.json                # Same-domain API routing
+```
+
+The root Python environment stays intentionally small. Packages such as Pandas,
+GeoPandas, PyArrow, NumPy, and Shapely live only in `pipelines/.venv` and are not
+installed in the Vercel runtime.
+
+## Environment variables
+
+Copy the safe template and add the two Neon connection strings:
+
+```bash
+cp .env.example .env.local
+```
+
+```dotenv
+DATABASE_URL="postgresql://...-pooler.../neondb?sslmode=require"
+DATABASE_URL_DIRECT="postgresql://.../neondb?sslmode=require"
+```
+
+`.env.local`, `.env`, `.neon`, `.vercel`, and both virtual environments are
+git-ignored. Never commit database credentials.
+
+## Local development
+
+Install the frontend and lightweight backend dependencies:
+
+```bash
+npm install
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+For the deployment-like combined runtime, use the Vercel CLI from the repository
+root:
+
+```bash
+vercel dev
+```
+
+Then open:
+
+- [http://localhost:3000](http://localhost:3000)
+- [http://localhost:3000/api/health](http://localhost:3000/api/health)
+- [http://localhost:3000/api/properties](http://localhost:3000/api/properties)
+
+The frontend and backend can also be run separately when debugging:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+```bash
+set -a
+source .env.local
+set +a
+source .venv/bin/activate
+uvicorn api.index:app --reload
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Database migrations
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Alembic imports `Base.metadata` from the application models and always uses the
+direct Neon connection:
 
-## Learn More
+```bash
+set -a
+source .env.local
+set +a
+source .venv/bin/activate
 
-To learn more about Next.js, take a look at the following resources:
+alembic revision --autogenerate -m "describe schema change"
+alembic upgrade head
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Inspect every autogenerated migration before applying it. The Alembic environment
+excludes PostGIS's extension-managed `spatial_ref_sys` table from comparisons.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Data pipeline
 
-## Deploy on Vercel
+The pipeline has its own heavyweight environment:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+python3 -m venv pipelines/.venv
+source pipelines/.venv/bin/activate
+pip install -r pipelines/requirements.txt
+python pipelines/ingest_properties.py
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The starter pipeline performs an idempotent upsert of `TEST-0001`, a fake Raleigh
+property. It connects through `DATABASE_URL_DIRECT`; rerunning it updates the
+existing parcel instead of creating a duplicate.
+
+## API
+
+### `GET /api/health`
+
+Returns basic service health:
+
+```json
+{
+  "status": "ok",
+  "service": "parcel-panda-api"
+}
+```
+
+### `GET /api/properties`
+
+Returns the properties currently stored in Neon. FastAPI's generated OpenAPI and
+Swagger documentation is available at `/docs` when the Python application is run
+directly.
+
+## Verification
+
+```bash
+npm run lint
+npm run build
+.venv/bin/python -m compileall -q api backend pipelines/ingest_properties.py
+```

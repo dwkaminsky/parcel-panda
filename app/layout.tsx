@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Plot Twist",
-  description: "Real estate parcel intelligence",
+  title: "Parcel Panda",
+  description: "Friendly real estate parcel intelligence",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

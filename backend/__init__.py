@@ -1,1 +1,1 @@
-"""Plot Twist backend package."""
+"""Parcel Panda backend package."""
