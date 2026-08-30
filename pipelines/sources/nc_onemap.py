@@ -122,10 +122,6 @@ class NCOneMapParcelAdapter:
         )
 
 
-# Backwards-friendly plural spelling for registry code.
-NCOneMapParcelsAdapter = NCOneMapParcelAdapter
-
-
 class NCOneMapAssessedValueAdapter(NCOneMapParcelAdapter):
     """Expose the same parcel observations through the assessed-value dataset."""
 

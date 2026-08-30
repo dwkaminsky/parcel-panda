@@ -122,6 +122,3 @@ class NCEMFloodAdapter:
             records=records,
             warnings=warnings,
         )
-
-
-NCEMFrisAdapter = NCEMFloodAdapter

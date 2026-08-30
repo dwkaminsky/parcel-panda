@@ -4,6 +4,7 @@ import gzip
 import hashlib
 import os
 import re
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -95,10 +96,7 @@ def save_snapshot(
         manifest_path.write_text(manifest.model_dump_json(indent=2) + "\n", encoding="utf-8")
         os.replace(temporary, destination)
     except Exception:
-        for path in temporary.iterdir() if temporary.exists() else ():
-            path.unlink()
-        if temporary.exists():
-            temporary.rmdir()
+        shutil.rmtree(temporary, ignore_errors=True)
         raise
 
     return LocalCollectionSummary(

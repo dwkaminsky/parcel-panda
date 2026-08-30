@@ -50,6 +50,13 @@ def _datetime(value: Any) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
+def _updatable_values(
+    values: dict[str, Any],
+    immutable_keys: set[str],
+) -> dict[str, Any]:
+    return {key: value for key, value in values.items() if key not in immutable_keys}
+
+
 class PipelineRepository:
     def __init__(self, engine: Engine):
         self.engine = engine
@@ -264,7 +271,10 @@ class PipelineRepository:
             connection.execute(
                 statement.on_conflict_do_update(
                     constraint="uq_property_records_source_parcel",
-                    set_={key: value for key, value in values.items() if key not in {"source_slug", "county_fips", "parcel_id"}},
+                    set_=_updatable_values(
+                        values,
+                        {"source_slug", "county_fips", "parcel_id"},
+                    ),
                 )
             )
             return
@@ -309,7 +319,10 @@ class PipelineRepository:
             connection.execute(
                 statement.on_conflict_do_update(
                     constraint="uq_listing_records_source_listing",
-                    set_={key: value for key, value in values.items() if key not in {"source_slug", "listing_type", "source_listing_id"}},
+                    set_=_updatable_values(
+                        values,
+                        {"source_slug", "listing_type", "source_listing_id"},
+                    ),
                 )
             )
             return
@@ -327,7 +340,10 @@ class PipelineRepository:
             connection.execute(
                 statement.on_conflict_do_update(
                     constraint="uq_spatial_features_source_feature",
-                    set_={key: value for key, value in values.items() if key not in {"source_slug", "source_layer", "source_feature_id"}},
+                    set_=_updatable_values(
+                        values,
+                        {"source_slug", "source_layer", "source_feature_id"},
+                    ),
                 )
             )
             return
