@@ -270,6 +270,82 @@ The committed `vercel.json` routes `/api/*` to `api/index.py`, while Next.js own
 the rest of the domain. The root `requirements.txt` controls the Python function
 dependencies.
 
+## Create a Preview deployment
+
+Vercel automatically creates a Preview deployment for pushes to non-production
+Git branches and for pull requests. The Preview receives a unique URL and does
+not replace `parcel-panda.vercel.app`.
+
+```bash
+git switch -c preview/property-cards
+git push -u origin preview/property-cards
+```
+
+Optionally open a pull request:
+
+```bash
+gh pr create
+```
+
+The Vercel URL appears in the GitHub checks and Vercel bot comment. Every new push
+to the branch updates that Preview.
+
+### Isolate Preview data
+
+Do not point a writable Preview deployment at the production Neon branch. For
+this existing Neon account, the recommended automated option is the
+[Neon-managed Vercel integration](https://neon.com/docs/guides/neon-managed-vercel-integration),
+which provisions Neon branches for Vercel previews and injects their environment
+variables.
+
+For a manual branch-specific setup, create and select a Neon branch:
+
+```bash
+neon checkout preview-property-cards
+neon connection-string preview-property-cards --pooled --ssl require
+neon connection-string preview-property-cards --ssl require
+```
+
+Use the first command's pooled URL as a branch-specific Vercel Preview variable:
+
+```bash
+vercel env add DATABASE_URL preview \
+  --git-branch preview/property-cards
+```
+
+Keep the second, direct URL in local `DATABASE_URL_DIRECT`, apply migrations to
+the Neon Preview branch, and run any Preview seed pipeline before testing:
+
+```bash
+source .venv/bin/activate
+set -a
+source .env.local
+set +a
+alembic upgrade head
+
+source pipelines/.venv/bin/activate
+python pipelines/ingest_properties.py
+```
+
+Check both hostnames before running those commands: the Vercel value must contain
+`-pooler`, while the local migration and pipeline value must not. After Preview
+work, switch the Neon CLI back to production deliberately:
+
+```bash
+neon checkout production
+```
+
+For a one-off Preview from the linked local checkout, deploy without `--prod`:
+
+```bash
+vercel deploy
+```
+
+`vercel deploy --prod` is intentionally different and updates production. See
+[Vercel environments](https://vercel.com/docs/deployments/environments) and the
+[Neon–Vercel integration guide](https://neon.com/docs/guides/vercel-overview) for
+the managed Preview-branch options.
+
 ## Commit and deploy
 
 Confirm no secrets are tracked:

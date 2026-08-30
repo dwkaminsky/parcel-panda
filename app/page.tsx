@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 type Property = {
   id: number;
@@ -68,9 +69,10 @@ export default function Home() {
               Parcel Panda
             </span>
           </a>
-          <span className="rounded-full border border-[var(--line)] bg-white/70 px-3 py-1.5 text-xs font-semibold text-[var(--muted)] shadow-sm backdrop-blur">
-            Raleigh, NC
-          </span>
+          <div className="flex items-center gap-2">
+            <Link href="/data" className="rounded-full border border-[var(--forest)] bg-[var(--forest)] px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-[var(--forest-dark)]">Data catalog</Link>
+            <span className="hidden rounded-full border border-[var(--line)] bg-white/70 px-3 py-1.5 text-xs font-semibold text-[var(--muted)] shadow-sm backdrop-blur sm:inline">Raleigh, NC</span>
+          </div>
         </header>
 
         <section id="top" className="relative py-14 sm:py-24">
