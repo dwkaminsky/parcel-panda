@@ -39,11 +39,6 @@ export default function DataCatalogPage() {
           <CatalogClient />
         </section>
 
-        <section className="catalog-roadmap">
-          <div><p className="eyebrow">Built to travel</p><h2>North Carolina is chapter one.</h2></div>
-          <p>We’re starting with public NC records, then expanding to new geographies and licensed sources based on demand. Planned never means promised: each integration advances only after its coverage, terms, and reliability are understood.</p>
-        </section>
-
         <footer className="catalog-footer"><p>Parcel Panda · Property intelligence with a softer footprint.</p><p>Sources cited individually · Coverage stated plainly</p></footer>
       </div>
     </main>
