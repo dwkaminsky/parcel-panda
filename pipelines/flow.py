@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from uuid import UUID
 
 from prefect import flow, task
@@ -8,7 +9,14 @@ from prefect.cache_policies import NO_CACHE
 from prefect.context import get_run_context
 
 from pipelines.config import DatasetId, RunOptions
-from pipelines.contracts import CatalogRunSummary, ExtractedBatch, LoadSummary
+from pipelines.contracts import (
+    CatalogRunSummary,
+    ExtractedBatch,
+    LoadedSnapshot,
+    LocalCollectionSummary,
+    LoadSummary,
+)
+from pipelines.local_snapshot import load_snapshot, save_snapshot
 from pipelines.sources import (
     CensusACS5Adapter,
     CFPBMortgagePerformanceAdapter,
@@ -23,7 +31,6 @@ from pipelines.sources import (
     RentCastSaleAdapter,
 )
 from pipelines.sources.base import SourceAdapter
-from pipelines.storage import make_repository_from_env
 
 
 AdapterFactory = Callable[[], SourceAdapter]
@@ -68,25 +75,41 @@ def extract_source(key: AdapterKey, options: RunOptions) -> ExtractedBatch:
 
 
 @task(
-    name="load-source",
+    name="save-local-snapshot",
+    cache_policy=NO_CACHE,
+    persist_result=False,
+)
+def save_local_snapshot(
+    batches: list[ExtractedBatch],
+    options: RunOptions,
+    output_root: str | Path,
+) -> LocalCollectionSummary:
+    return save_snapshot(batches, options, output_root)
+
+
+@task(
+    name="read-local-snapshot",
+    cache_policy=NO_CACHE,
+    persist_result=False,
+)
+def read_local_snapshot(snapshot: str | Path) -> LoadedSnapshot:
+    return load_snapshot(snapshot)
+
+
+@task(
+    name="publish-source",
     retries=2,
     retry_delay_seconds=[2, 10],
     cache_policy=NO_CACHE,
     persist_result=False,
 )
-def load_source(
+def publish_source(
     batch: ExtractedBatch,
     options: RunOptions,
     prefect_flow_run_id: UUID | None,
 ) -> LoadSummary:
-    if options.dry_run:
-        return LoadSummary(
-            dataset_slug=batch.dataset_slug,
-            source_slug=batch.source_slug,
-            extracted=len(batch.records),
-            dry_run=True,
-            skipped_reason=batch.skipped_reason,
-        )
+    from pipelines.storage import make_repository_from_env
+
     return make_repository_from_env().ingest_batch(
         batch,
         options,
@@ -94,13 +117,15 @@ def load_source(
     )
 
 
-@flow(name="property-data-catalog", log_prints=True)
-def run_catalog(options: RunOptions | dict) -> CatalogRunSummary:
-    """Extract selected NC catalog sources and optionally load them idempotently."""
-    validated_options = RunOptions.model_validate(options)
-    context = get_run_context()
-    flow_run_id = context.flow_run.id if context.flow_run else None
-
+@flow(name="collect-property-data", log_prints=True)
+def collect_catalog(
+    options: RunOptions | dict,
+    output_root: str | Path = "pipelines/data/runs",
+) -> LocalCollectionSummary:
+    """Extract selected NC sources into a local, publishable snapshot."""
+    validated_options = RunOptions.model_validate(options).model_copy(
+        update={"dry_run": True}
+    )
     extraction_futures = [
         extract_source.with_options(name=f"extract-{source_slug}").submit(
             (dataset_slug, source_slug),
@@ -109,15 +134,32 @@ def run_catalog(options: RunOptions | dict) -> CatalogRunSummary:
         for dataset_slug, source_slug in selected_adapter_keys(validated_options)
     ]
 
-    summaries: list[LoadSummary] = []
+    batches: list[ExtractedBatch] = []
     for future in extraction_futures:
         batch = future.result()
         for warning in batch.warnings:
             print(f"{batch.source_slug}: {warning}")
-        summaries.append(load_source(batch, validated_options, flow_run_id))
+        batches.append(batch)
+    return save_local_snapshot(batches, validated_options, output_root)
+
+
+@flow(name="publish-property-data", log_prints=True)
+def publish_catalog(snapshot: str | Path) -> CatalogRunSummary:
+    """Verify and publish a previously collected local snapshot idempotently."""
+    loaded_snapshot = read_local_snapshot(snapshot)
+    options = RunOptions.model_validate(loaded_snapshot.manifest.options).model_copy(
+        update={"dry_run": False}
+    )
+    context = get_run_context()
+    flow_run_id = context.flow_run.id if context.flow_run else None
+
+    summaries = [
+        publish_source(batch, options, flow_run_id)
+        for batch in loaded_snapshot.batches
+    ]
 
     return CatalogRunSummary(
-        datasets_requested=len(validated_options.datasets),
+        datasets_requested=len({batch.dataset_slug for batch in loaded_snapshot.batches}),
         batches=summaries,
-        dry_run=validated_options.dry_run,
+        dry_run=False,
     )

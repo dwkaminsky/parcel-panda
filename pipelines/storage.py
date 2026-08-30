@@ -346,7 +346,7 @@ def make_repository(database_url: str) -> PipelineRepository:
 def make_repository_from_env() -> PipelineRepository:
     database_url = os.environ.get("DATABASE_URL_DIRECT")
     if not database_url:
-        raise RuntimeError("DATABASE_URL_DIRECT is required for pipeline write runs")
+        raise RuntimeError("DATABASE_URL_DIRECT is required for snapshot publishing")
     if "-pooler" in database_url:
         raise RuntimeError("Pipeline writes require a direct Neon connection, not a pooled URL")
     return make_repository(database_url)

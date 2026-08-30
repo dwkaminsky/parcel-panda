@@ -4,6 +4,7 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -74,3 +75,38 @@ class CatalogRunSummary(BaseModel):
     @property
     def extracted(self) -> int:
         return sum(batch.extracted for batch in self.batches)
+
+
+class SnapshotBatch(BaseModel):
+    dataset_slug: str
+    source_slug: str
+    source_version: str | None = None
+    retrieved_at: datetime
+    record_count: int = Field(ge=0)
+    file: str
+    sha256: str
+    warnings: list[str] = Field(default_factory=list)
+    skipped_reason: str | None = None
+
+
+class SnapshotManifest(BaseModel):
+    schema_version: int = 1
+    snapshot_id: str
+    created_at: datetime
+    options: dict[str, Any]
+    batches: list[SnapshotBatch]
+
+
+class LocalCollectionSummary(BaseModel):
+    snapshot_path: Path
+    manifest_path: Path
+    batches: list[LoadSummary]
+
+    @property
+    def extracted(self) -> int:
+        return sum(batch.extracted for batch in self.batches)
+
+
+class LoadedSnapshot(BaseModel):
+    manifest: SnapshotManifest
+    batches: list[ExtractedBatch]

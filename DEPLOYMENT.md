@@ -13,10 +13,11 @@ Use this order for a new environment or release:
 2. Link the repository to the correct Neon organization, project, and branch.
 3. Configure the pooled and direct database URLs.
 4. Apply Alembic migrations with the direct URL.
-5. Dry-run required Prefect pipeline jobs, then repeat them with `--write`.
-6. Verify the application locally.
-7. Push the release commit and deploy it to Vercel.
-8. Smoke-test the production homepage and API.
+5. Collect required Prefect snapshots locally and review their manifests.
+6. Publish reviewed snapshots to the intended database branch.
+7. Verify the application locally.
+8. Push the release commit and deploy it to Vercel.
+9. Smoke-test the production homepage and API.
 
 Database migrations must be compatible with both the currently deployed app and
 the release being deployed. For breaking schema changes, use an expand-and-contract
@@ -134,7 +135,7 @@ neon status
 Keep `.env.local` pointed at that child while developing. If you obtain URLs
 with `neon connection-string`, put the pooled child URL in `DATABASE_URL` and the
 direct child URL in `DATABASE_URL_DIRECT`. Do not run a feature migration or a
-pipeline `--write` against `production` merely because the code is on a local
+snapshot publisher against `production` merely because the code is on a local
 feature branch. Before merging a schema change, run `neon diff` and review the
 child-to-parent schema difference.
 
@@ -214,7 +215,7 @@ $env:DATABASE_URL_DIRECT = "postgresql://..."
 alembic upgrade head
 ```
 
-Apply migrations before the first pipeline write. The catalog pipeline writes to
+Apply migrations before the first snapshot publication. The publisher writes to
 the catalog, source provenance, ingestion run, and normalized record tables, so
 running it against an older schema will fail. For a feature branch, use this
 order:
@@ -222,11 +223,11 @@ order:
 1. `neon checkout` the isolated child and load its pooled/direct URLs.
 2. Inspect the migration and run `alembic upgrade head` with
    `DATABASE_URL_DIRECT`.
-3. Run a bounded pipeline dry run.
-4. Repeat the reviewed command with `--write` against the child.
+3. Collect a bounded local snapshot and inspect its manifest.
+4. Publish that exact snapshot against the child branch.
 5. Inspect `neon diff`, application behavior, and the ingestion summary.
 6. Only then apply the same reviewed migration to production, deploy compatible
-   application code, and run the production pipeline write.
+   application code, and publish the reviewed snapshot to production.
 
 Migrations use the direct URL because schema tools rely on session behavior that
 is not guaranteed through PgBouncer's transaction pool. The web application
@@ -235,8 +236,9 @@ continues to use the pooled URL.
 ## Run the data pipeline
 
 Pipeline jobs run on a workstation or dedicated worker, never inside the Vercel
-web runtime. Prefect orchestrates source extraction and normalized loading while
-the command-line interface supplies a safe run configuration.
+web runtime. Prefect uses separate flows for source collection and database
+publishing. Collection has no database code path; publishing never calls an
+upstream source.
 
 ```bash
 source pipelines/.venv/bin/activate
@@ -244,37 +246,40 @@ set -a
 source .env.local
 set +a
 
-# Safe default: extract and summarize without writing.
-python -m pipelines
+# Collect the default public starter set into pipelines/data/runs.
+python -m pipelines collect
 
 # Select one or more datasets and bound every source request.
-python -m pipelines \
+python -m pipelines collect \
   --dataset parcel-records \
   --dataset property-tax \
   --county-fips 37183 \
   --limit 100
 
-# Persist only after reviewing the dry-run summary and database target.
-python -m pipelines \
-  --dataset parcel-records \
-  --dataset property-tax \
-  --county-fips 37183 \
-  --limit 100 \
-  --write
+# Review the timestamped directory and checksummed manifest first.
+python -m pipelines publish pipelines/data/runs/20260830T180000Z-ab12cd34
 ```
 
 `--dataset` is repeatable. A three-digit NC county code is normalized to its
 five-digit FIPS code, so `183` and `37183` both select Wake County. The record
 limit must be between 1 and 5000. Raw source payload retention is enabled for
 provenance by default; add `--no-raw-payloads` to retain only normalized records
-and content hashes. Run `python -m pipelines --help` for the complete interface.
+and content hashes. Run `python -m pipelines collect --help` for collection
+options and `python -m pipelines publish --help` for publishing.
 
-The pipeline command defaults to dry-run mode. Database mutation requires the
-explicit `--write` flag and `DATABASE_URL_DIRECT`. Repeating the same source
-version/content is idempotent: source keys and content hashes prevent identical
-records from being loaded again, and each write run records an ingestion summary.
-Dry runs still call upstream sources and may consume licensed API quota, so use a
-small `--limit` during development.
+`collect` writes only local compressed JSON Lines files plus `manifest.json`.
+The manifest preserves source versions, retrieval times, warnings, skip reasons,
+record counts, collection options, and SHA-256 checksums. `publish` verifies the
+entire snapshot before opening `DATABASE_URL_DIRECT`; corrupt or incomplete
+snapshots fail before any database mutation. Repeating publication is idempotent:
+source keys and content hashes prevent identical records from being loaded again,
+and each publication records an ingestion summary. Collection still calls
+upstream sources and may consume licensed API quota, so use a small `--limit`
+during development.
+
+Local snapshots may contain personally identifying ownership data or licensed
+provider payloads. `pipelines/data/` is git-ignored, but operators must still
+protect, retain, and delete snapshots according to source terms and local policy.
 
 ### Pipeline credentials
 
@@ -288,7 +293,7 @@ CENSUS_API_KEY="..."
 RENTCAST_API_KEY="..."
 ```
 
-- `DATABASE_URL_DIRECT` is required for pipeline writes and must target the
+- `DATABASE_URL_DIRECT` is required only for snapshot publishing and must target the
   intended Neon branch without `-pooler` in its hostname.
 - `CENSUS_API_KEY` authenticates Census API requests and provides practical
   request capacity for ACS ingestion.
@@ -440,8 +445,8 @@ set +a
 alembic upgrade head
 
 source pipelines/.venv/bin/activate
-python -m pipelines --limit 100
-python -m pipelines --limit 100 --write
+python -m pipelines collect --limit 100
+python -m pipelines publish pipelines/data/runs/<reviewed-snapshot>
 ```
 
 Check both hostnames before running those commands: the Vercel value must contain
@@ -521,8 +526,8 @@ Also verify in a browser:
 2. If the schema changes, generate and inspect an Alembic revision.
 3. Run lint, build, Python compilation, and dependency checks.
 4. Apply backward-compatible migrations with `DATABASE_URL_DIRECT`.
-5. Dry-run required pipeline jobs, then explicitly repeat with `--write` and
-   `DATABASE_URL_DIRECT`.
+5. Collect required snapshots, review their manifests, then publish those exact
+   snapshots with `DATABASE_URL_DIRECT`.
 6. Merge or push the release commit to `main`.
 7. Wait for the production deployment to become `Ready`.
 8. Run the production smoke test.
@@ -550,17 +555,17 @@ Use `vercel dev`, not `next dev`, when testing combined Next.js/Python routing.
 Confirm heavy dependencies exist only in `pipelines/requirements.txt` and that
 the root `requirements.txt` remains the lightweight FastAPI runtime.
 
-### A pipeline write targets the wrong data
+### Snapshot publishing targets the wrong data
 
 Stop the flow and inspect `neon status`, `.neon`, and the hostnames loaded from
 `.env.local`. Git and Neon branches are independent; switching Git branches does
 not switch the database. Run `neon checkout <expected-branch>` and reload the
-environment before retrying. Dry-run mode is the default specifically to make
-this check possible before mutation.
+environment before retrying. Collection remains safe because it never reads a
+database URL; publishing should start only after the branch check is complete.
 
 ### A licensed or keyed dataset is skipped
 
 Confirm the adapter's credential variable is present in the same process that
-runs `python -m pipelines`. Census reads `CENSUS_API_KEY`; RentCast reads
+runs `python -m pipelines collect`. Census reads `CENSUS_API_KEY`; RentCast reads
 `RENTCAST_API_KEY`. A key can still be rejected because of provider quotas,
 subscription scope, or expiration.
