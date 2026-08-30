@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Parcel Panda",
-  description: "Friendly real estate parcel intelligence",
+  title: "Parcel Atlas — Raleigh Property Intelligence",
+  description: "Explore Raleigh property values, parcels, and neighborhoods in a beautifully detailed atlas.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
