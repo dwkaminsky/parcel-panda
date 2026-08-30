@@ -1,0 +1,8 @@
+pandas
+geopandas
+pyarrow
+requests
+psycopg[binary]
+sqlalchemy
+python-dotenv
+tqdm
