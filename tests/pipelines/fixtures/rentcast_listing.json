@@ -1,0 +1,22 @@
+{
+  "id": "123-Bamboo-Ln-Raleigh-NC-27601",
+  "formattedAddress": "123 Bamboo Ln, Raleigh, NC 27601",
+  "addressLine1": "123 Bamboo Ln",
+  "city": "Raleigh",
+  "state": "NC",
+  "stateFips": "37",
+  "zipCode": "27601",
+  "county": "Wake",
+  "countyFips": "183",
+  "latitude": 35.7796,
+  "longitude": -78.6382,
+  "propertyType": "Single Family",
+  "bedrooms": 3,
+  "bathrooms": 2.5,
+  "squareFootage": 1840,
+  "status": "Active",
+  "price": 525000,
+  "listingType": "Standard",
+  "listedDate": "2026-08-01T00:00:00.000Z",
+  "lastSeenDate": "2026-08-29T12:30:00.000Z"
+}

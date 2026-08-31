@@ -6,3 +6,5 @@ psycopg[binary]
 sqlalchemy
 python-dotenv
 tqdm
+openpyxl>=3.1,<4
+prefect==3.8.4

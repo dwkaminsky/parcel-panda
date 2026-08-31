@@ -1,8 +1,10 @@
 import os
 
 from sqlalchemy import create_engine
-from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
+
+from backend.base import Base
 
 
 def sqlalchemy_url(url: str) -> str:
@@ -27,10 +29,6 @@ SessionLocal = sessionmaker(
     autoflush=False,
     autocommit=False,
 )
-
-
-class Base(DeclarativeBase):
-    pass
 
 
 def get_db():

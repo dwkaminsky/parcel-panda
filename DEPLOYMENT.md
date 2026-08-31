@@ -13,10 +13,11 @@ Use this order for a new environment or release:
 2. Link the repository to the correct Neon organization, project, and branch.
 3. Configure the pooled and direct database URLs.
 4. Apply Alembic migrations with the direct URL.
-5. Run any required pipeline jobs with the direct URL.
-6. Verify the application locally.
-7. Push the release commit and deploy it to Vercel.
-8. Smoke-test the production homepage and API.
+5. Collect required Prefect snapshots locally and review their manifests.
+6. Publish reviewed snapshots to the intended database branch.
+7. Verify the application locally.
+8. Push the release commit and deploy it to Vercel.
+9. Smoke-test the production homepage and API.
 
 Database migrations must be compatible with both the currently deployed app and
 the release being deployed. For breaking schema changes, use an expand-and-contract
@@ -74,7 +75,7 @@ Create the separate heavyweight pipeline environment:
 ```bash
 python3 -m venv pipelines/.venv
 source pipelines/.venv/bin/activate
-python -m pip install -r pipelines/requirements.txt
+python -m pip install -r pipelines/requirements-dev.txt
 deactivate
 ```
 
@@ -83,13 +84,14 @@ On Windows PowerShell:
 ```powershell
 python -m venv pipelines/.venv
 .\pipelines\.venv\Scripts\Activate.ps1
-python -m pip install -r pipelines/requirements.txt
+python -m pip install -r pipelines/requirements-dev.txt
 deactivate
 ```
 
 Do not install Pandas, GeoPandas, PyArrow, NumPy, Shapely, or other pipeline-only
 packages into the root `.venv` or `requirements.txt`. Vercel installs only the
-root requirements.
+root requirements. Dedicated workers can install `pipelines/requirements.txt`;
+the development file includes it and adds the test runner.
 
 ## Configure Neon
 
@@ -115,6 +117,31 @@ neon config plan
 
 `neon.ts` currently declares Postgres as the only utilized Neon service. A clean
 plan should report no service changes.
+
+### Use an isolated branch for pipeline development
+
+Create or select a Neon branch alongside each Git feature branch. Neon branches
+are isolated copy-on-write database environments, so migrations and pipeline
+writes on the child do not change its parent. `neon checkout` also pins the local
+Neon context and pulls branch-scoped variables by default.
+
+```bash
+git switch -c feature/example
+neon branch create --name dev-feature-example --parent production
+neon checkout dev-feature-example
+neon status
+```
+
+Keep `.env.local` pointed at that child while developing. If you obtain URLs
+with `neon connection-string`, put the pooled child URL in `DATABASE_URL` and the
+direct child URL in `DATABASE_URL_DIRECT`. Do not run a feature migration or a
+snapshot publisher against `production` merely because the code is on a local
+feature branch. Before merging a schema change, run `neon diff` and review the
+child-to-parent schema difference.
+
+Neon's environment pull may name the direct URL `DATABASE_URL_UNPOOLED`. This
+repository uses the equivalent name `DATABASE_URL_DIRECT`, so copy the pulled
+direct value to that key before running Alembic or a write pipeline.
 
 ### Configure local database URLs
 
@@ -188,20 +215,113 @@ $env:DATABASE_URL_DIRECT = "postgresql://..."
 alembic upgrade head
 ```
 
+Apply migrations before the first snapshot publication. The publisher writes to
+the catalog, source provenance, ingestion run, and normalized record tables, so
+running it against an older schema will fail. For a feature branch, use this
+order:
+
+1. `neon checkout` the isolated child and load its pooled/direct URLs.
+2. Inspect the migration and run `alembic upgrade head` with
+   `DATABASE_URL_DIRECT`.
+3. Collect a bounded local snapshot and inspect its manifest.
+4. Publish that exact snapshot against the child branch.
+5. Inspect `neon diff`, application behavior, and the ingestion summary.
+6. Only then apply the same reviewed migration to production, deploy compatible
+   application code, and publish the reviewed snapshot to production.
+
+Migrations use the direct URL because schema tools rely on session behavior that
+is not guaranteed through PgBouncer's transaction pool. The web application
+continues to use the pooled URL.
+
 ## Run the data pipeline
 
-Pipeline jobs run on the workstation or gaming PC, never inside the Vercel web
-runtime. The starter job performs an idempotent upsert of the fake Raleigh parcel
-`TEST-0001`.
+Pipeline jobs run on a workstation or dedicated worker, never inside the Vercel
+web runtime. Prefect uses separate flows for source collection and database
+publishing. Collection has no database code path; publishing never calls an
+upstream source.
 
 ```bash
 source pipelines/.venv/bin/activate
-python pipelines/ingest_properties.py
-deactivate
+set -a
+source .env.local
+set +a
+
+# Collect the default public starter set into pipelines/data/runs.
+python -m pipelines collect
+
+# Select one or more datasets and bound every source request.
+python -m pipelines collect \
+  --dataset parcel-records \
+  --dataset property-tax \
+  --county-fips 37183 \
+  --limit 100
+
+# Review the timestamped directory and checksummed manifest first.
+python -m pipelines publish pipelines/data/runs/20260830T180000Z-ab12cd34
 ```
 
-The script loads `DATABASE_URL_DIRECT` from `.env.local`. Rerunning it updates the
-existing parcel rather than creating a duplicate.
+`--dataset` is repeatable. A three-digit NC county code is normalized to its
+five-digit FIPS code, so `183` and `37183` both select Wake County. The record
+limit must be between 1 and 5000. Raw source payload retention is enabled for
+provenance by default; add `--no-raw-payloads` to retain only normalized records
+and content hashes. Run `python -m pipelines collect --help` for collection
+options and `python -m pipelines publish --help` for publishing.
+
+`collect` writes only local compressed JSON Lines files plus `manifest.json`.
+The manifest preserves source versions, retrieval times, warnings, skip reasons,
+record counts, collection options, and SHA-256 checksums. `publish` verifies the
+entire snapshot before opening `DATABASE_URL_DIRECT`; corrupt or incomplete
+snapshots fail before any database mutation. Repeating publication is idempotent:
+source keys and content hashes prevent identical records from being loaded again,
+and each publication records an ingestion summary. Collection still calls
+upstream sources and may consume licensed API quota, so use a small `--limit`
+during development.
+
+Local snapshots may contain personally identifying ownership data or licensed
+provider payloads. `pipelines/data/` is git-ignored, but operators must still
+protect, retain, and delete snapshots according to source terms and local policy.
+
+### Pipeline credentials
+
+Copy the committed template and fill secrets only in ignored local or worker
+environment configuration:
+
+```dotenv
+DATABASE_URL="postgresql://...-pooler.../neondb?sslmode=require"
+DATABASE_URL_DIRECT="postgresql://.../neondb?sslmode=require"
+CENSUS_API_KEY="..."
+RENTCAST_API_KEY="..."
+```
+
+- `DATABASE_URL_DIRECT` is required only for snapshot publishing and must target the
+  intended Neon branch without `-pooler` in its hostname.
+- `CENSUS_API_KEY` authenticates Census API requests and provides practical
+  request capacity for ACS ingestion.
+- `RENTCAST_API_KEY` is required for licensed active sale and rental listing
+  endpoints. Provider usage limits and license terms still apply.
+
+Do not put source credentials or the direct database URL in Vercel's browser
+environment. A scheduler or Prefect worker should inject them as secrets when
+pipeline runs move beyond local execution.
+
+### Source limitations
+
+The adapters preserve citations and provenance, but they cannot make unlike
+government and commercial sources uniform at extraction time:
+
+| Source family | Important boundary |
+| --- | --- |
+| NC OneMap parcels | County participation, field names, completeness, geometry, and refresh timing vary. Assessed values are county-provided snapshots, not a statewide real-time tax ledger. |
+| NCDOR property-tax reports | Published reports provide tax context and aggregates; they do not replace county parcel bills or payment records. |
+| Census ACS 5-year | Values are estimates for Census geographies, not property-level facts, and should be interpreted with their geography, vintage, and margins of error. |
+| CFPB / New York Fed mortgage data | Delinquency and balance measures are aggregated and cannot identify a property's mortgage, borrower, or current loan status. |
+| NC flood layers | Mapped flood zones and elevation layers are planning data, not a survey, insurance determination, or guarantee of present risk. |
+| Municipal zoning | Coverage is municipality-specific; the initial Charlotte source should not be treated as statewide zoning. |
+| RentCast listings | Requires a licensed key and is subject to provider coverage, quotas, freshness, and downstream-use terms. A missing listing is not proof that a property is off market. |
+
+Source endpoints can change or temporarily fail. A successful flow means the
+adapter processed the source response it received; it does not certify that the
+publisher's underlying data is complete or current.
 
 ## Verify before deployment
 
@@ -210,9 +330,10 @@ Run the static and build checks:
 ```bash
 npm run lint
 npm run build
-.venv/bin/python -m compileall -q api backend pipelines/ingest_properties.py
+.venv/bin/python -m compileall -q api backend pipelines
 .venv/bin/python -m pip check
 pipelines/.venv/bin/python -m pip check
+pipelines/.venv/bin/python -m pytest tests/pipelines
 git diff --check
 ```
 
@@ -324,7 +445,8 @@ set +a
 alembic upgrade head
 
 source pipelines/.venv/bin/activate
-python pipelines/ingest_properties.py
+python -m pipelines collect --limit 100
+python -m pipelines publish pipelines/data/runs/<reviewed-snapshot>
 ```
 
 Check both hostnames before running those commands: the Vercel value must contain
@@ -404,7 +526,8 @@ Also verify in a browser:
 2. If the schema changes, generate and inspect an Alembic revision.
 3. Run lint, build, Python compilation, and dependency checks.
 4. Apply backward-compatible migrations with `DATABASE_URL_DIRECT`.
-5. Run required pipeline jobs with `DATABASE_URL_DIRECT`.
+5. Collect required snapshots, review their manifests, then publish those exact
+   snapshots with `DATABASE_URL_DIRECT`.
 6. Merge or push the release commit to `main`.
 7. Wait for the production deployment to become `Ready`.
 8. Run the production smoke test.
@@ -431,3 +554,18 @@ Use `vercel dev`, not `next dev`, when testing combined Next.js/Python routing.
 
 Confirm heavy dependencies exist only in `pipelines/requirements.txt` and that
 the root `requirements.txt` remains the lightweight FastAPI runtime.
+
+### Snapshot publishing targets the wrong data
+
+Stop the flow and inspect `neon status`, `.neon`, and the hostnames loaded from
+`.env.local`. Git and Neon branches are independent; switching Git branches does
+not switch the database. Run `neon checkout <expected-branch>` and reload the
+environment before retrying. Collection remains safe because it never reads a
+database URL; publishing should start only after the branch check is complete.
+
+### A licensed or keyed dataset is skipped
+
+Confirm the adapter's credential variable is present in the same process that
+runs `python -m pipelines collect`. Census reads `CENSUS_API_KEY`; RentCast reads
+`RENTCAST_API_KEY`. A key can still be rejected because of provider quotas,
+subscription scope, or expiration.

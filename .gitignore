@@ -48,6 +48,7 @@ next-env.d.ts
 # python
 /.venv/
 /pipelines/.venv/
+/pipelines/data/
 __pycache__/
 *.py[cod]
 .pytest_cache/

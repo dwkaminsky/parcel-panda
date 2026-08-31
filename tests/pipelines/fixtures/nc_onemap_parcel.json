@@ -1,0 +1,25 @@
+{
+  "attributes": {
+    "objectid": 101,
+    "parno": "  012345  ",
+    "nparno": "NC-ALT-012345",
+    "ownname": "PANDA FAMILY LLC",
+    "siteadd": "123 Bamboo Ln",
+    "scity": "Raleigh",
+    "sstate": "NC",
+    "szip": "27601",
+    "gisacres": 0.42,
+    "landval": 125000,
+    "improvval": 350000,
+    "parval": 475000,
+    "stfips": "37",
+    "cntyfips": "183",
+    "stcntyfips": "37183",
+    "revisedate": 1735689600000
+  },
+  "geometry": {
+    "x": -78.6382,
+    "y": 35.7796,
+    "spatialReference": {"wkid": 4326}
+  }
+}

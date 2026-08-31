@@ -1,0 +1,17 @@
+{
+  "attributes": {
+    "OBJECTID": 202,
+    "V_FLDARID": "NC-FLOOD-202",
+    "ZONE_LID": "1001",
+    "ZONE_LID_VALUE": "AE",
+    "ZONSUB_LID": "1000",
+    "SFHA_TF": 1,
+    "STATIC_BFE": 302.5,
+    "ST_FIPS": "37",
+    "CO_FIPS": "183"
+  },
+  "geometry": {
+    "rings": [[[-78.64, 35.78], [-78.63, 35.78], [-78.63, 35.77], [-78.64, 35.78]]],
+    "spatialReference": {"wkid": 4326}
+  }
+}
