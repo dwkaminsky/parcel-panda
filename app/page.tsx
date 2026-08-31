@@ -22,6 +22,28 @@ const neighborhoodData = {
 
 type Neighborhood = keyof typeof neighborhoodData;
 
+const geographies: Array<{
+  name: Neighborhood;
+  slug: string;
+  path: string;
+}> = [
+  {
+    name: "Boylan Heights",
+    slug: "boylan-heights",
+    path: "M79 90 330 52l124 84-30 244-166 65-183-123Z",
+  },
+  {
+    name: "Warehouse District",
+    slug: "warehouse-district",
+    path: "m454 136 260-50 102 130-63 196-167 88-162-120Z",
+  },
+  {
+    name: "Oakwood",
+    slug: "oakwood",
+    path: "m816 216 270-60 158 119-34 238-279 48-178-149Z",
+  },
+];
+
 function Icon({ name }: { name: "search" | "bookmark" | "locate" | "plus" | "minus" | "chevron" }) {
   const paths = {
     search: <><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></>,
@@ -71,9 +93,19 @@ export default function Home() {
           <g className="street-labels"><text x="570" y="292">HILLSBOROUGH ST</text><text x="318" y="492">WESTERN BLVD</text><text x="757" y="393">NEW BERN AVE</text></g>
         </svg>
         <svg className="geography-hit-map" viewBox="0 0 1200 800" preserveAspectRatio="xMidYMid slice" aria-label="Neighborhood geographies">
-          <path d="M79 90 330 52l124 84-30 244-166 65-183-123Z" tabIndex={0} aria-label="Boylan Heights geography" onMouseEnter={() => setHoveredArea("Boylan Heights")} onMouseLeave={() => setHoveredArea(null)} onFocus={() => setHoveredArea("Boylan Heights")} onBlur={() => setHoveredArea(null)} onClick={() => router.push("/areas/boylan-heights")}/>
-          <path d="m454 136 260-50 102 130-63 196-167 88-162-120Z" tabIndex={0} aria-label="Warehouse District geography" onMouseEnter={() => setHoveredArea("Warehouse District")} onMouseLeave={() => setHoveredArea(null)} onFocus={() => setHoveredArea("Warehouse District")} onBlur={() => setHoveredArea(null)} onClick={() => router.push("/areas/warehouse-district")}/>
-          <path d="m816 216 270-60 158 119-34 238-279 48-178-149Z" tabIndex={0} aria-label="Oakwood geography" onMouseEnter={() => setHoveredArea("Oakwood")} onMouseLeave={() => setHoveredArea(null)} onFocus={() => setHoveredArea("Oakwood")} onBlur={() => setHoveredArea(null)} onClick={() => router.push("/areas/oakwood")}/>
+          {geographies.map(({ name, slug, path }) => (
+            <path
+              key={slug}
+              d={path}
+              tabIndex={0}
+              aria-label={`${name} geography`}
+              onMouseEnter={() => setHoveredArea(name)}
+              onMouseLeave={() => setHoveredArea(null)}
+              onFocus={() => setHoveredArea(name)}
+              onBlur={() => setHoveredArea(null)}
+              onClick={() => router.push(`/areas/${slug}`)}
+            />
+          ))}
         </svg>
 
         {hoveredArea ? <div className={`geography-hover geography-${hoveredArea.toLowerCase().replaceAll(" ", "-")}`}><p>Neighborhood</p><strong>{hoveredArea}</strong><dl><div><dt>Median value</dt><dd>{neighborhoodData[hoveredArea].value}</dd></div><div><dt>1 year</dt><dd>{neighborhoodData[hoveredArea].change}</dd></div></dl><span>Click for full profile →</span></div> : null}
